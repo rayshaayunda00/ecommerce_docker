@@ -1,0 +1,17 @@
+{
+    "name": "product-services",
+    "version": "1.0.0",
+    "description": "services for product management",
+    "main": "app.js",
+    "scripts": {
+        "start": "node app.js"
+    },
+    "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "sequelize": "^6.37.0",
+    "mysql2": "^3.9.7"
+}
+
+    
+}

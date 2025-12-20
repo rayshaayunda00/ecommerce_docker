@@ -1,0 +1,84 @@
+version: "3.9"
+
+services:
+  # =======================
+  # DATABASE PRODUCT
+  # =======================
+  product-db:
+    image: mysql:8.0
+    container_name: product-db
+    restart: always
+    env_file:
+      - .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${PRODUCT_DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${PRODUCT_DB_NAME}
+    volumes:
+      - product-db-data:/var/lib/mysql
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      # PERBAIKAN DI SINI:
+      # Kita naikkan retries jadi 20x dan kasih start_period 60 detik.
+      # Ini memberi waktu total sekitar 3-4 menit untuk MySQL booting.
+      retries: 20
+      start_period: 60s 
+
+
+# =======================
+  # PHPMYADMIN (BARU)
+  # =======================
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: pma
+    restart: always
+    environment:
+      PMA_HOST: product-db
+      PMA_PORT: 3306
+      PMA_ARBITRARY: 1
+    ports:
+      - "8081:80"
+    depends_on:
+      - product-db
+
+      
+  # =======================
+  # PRODUCT SERVICE
+  # =======================
+  product-service:
+    build: ./product-services
+    container_name: product-service
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "${PRODUCT_SERVICE_PORT}:3000"
+    depends_on:
+      product-db:
+        condition: service_healthy
+
+  # =======================
+  # CART SERVICE
+  # =======================
+  cart-service:
+    build: ./cart-services
+    container_name: cart-service
+    restart: always
+    ports:
+      - "8001:8000"
+
+  # =======================
+  # REVIEW SERVICE
+  # =======================
+  review-service:
+    build: ./review-services
+    container_name: review-service
+    restart: always
+    ports:
+      - "5002:5002"
+
+volumes:
+  product-db-data:
