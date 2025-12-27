@@ -1,9 +1,9 @@
 version: "3.9"
 
 services:
-  # =======================
-  # DATABASE PRODUCT
-  # =======================
+  # =========================================
+  # 1. DATABASE: MYSQL (Untuk Product Service)
+  # =========================================
   product-db:
     image: mysql:8.0
     container_name: product-db
@@ -13,24 +13,24 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${PRODUCT_DB_ROOT_PASSWORD}
       MYSQL_DATABASE: ${PRODUCT_DB_NAME}
+      MYSQL_USER: ${PRODUCT_DB_USER}
+      MYSQL_PASSWORD: ${PRODUCT_DB_PASSWORD}
     volumes:
       - product-db-data:/var/lib/mysql
     ports:
       - "3307:3306"
+    networks:
+      - ecommerce-network
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
       timeout: 5s
-      # PERBAIKAN DI SINI:
-      # Kita naikkan retries jadi 20x dan kasih start_period 60 detik.
-      # Ini memberi waktu total sekitar 3-4 menit untuk MySQL booting.
       retries: 20
-      start_period: 60s 
+      start_period: 60s
 
-
-# =======================
-  # PHPMYADMIN (BARU)
-  # =======================
+  # =========================================
+  # 2. GUI: PHPMYADMIN (Untuk MySQL)
+  # =========================================
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
     container_name: pma
@@ -40,45 +40,133 @@ services:
       PMA_PORT: 3306
       PMA_ARBITRARY: 1
     ports:
-      - "8081:80"
+      - "8082:80" # Port 8082 (Beda dengan Mongo Express)
+    networks:
+      - ecommerce-network
     depends_on:
-      - product-db
+      product-db:
+        condition: service_healthy
 
-      
-  # =======================
-  # PRODUCT SERVICE
-  # =======================
+  # =========================================
+  # 3. DATABASE: MONGODB (Untuk Review Service)
+  # =========================================
+  review-db:
+    image: mongo:latest
+    container_name: review-db
+    restart: always
+    env_file:
+      - .env
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    volumes:
+      - review-db-data:/data/db
+    ports:
+      - "${MONGO_PORT}:27017"
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =========================================
+  # 4. GUI: MONGO EXPRESS (Untuk MongoDB)
+  # =========================================
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo-express
+    restart: always
+    ports:
+      - "${MONGO_EXPRESS_PORT}:8081" # Port 8081 sesuai .env
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      ME_CONFIG_MONGODB_SERVER: review-db # Mengarah ke container review-db
+      ME_CONFIG_MONGODB_PORT: 27017
+      ME_CONFIG_MONGODB_AUTH_DATABASE: admin
+    networks:
+      - ecommerce-network
+    depends_on:
+      - review-db
+
+  # =========================================
+  # 5. APP: PRODUCT SERVICE (Node.js)
+  # =========================================
   product-service:
     build: ./product-services
     container_name: product-service
     restart: always
     env_file:
       - .env
+    environment:
+      - DB_HOST=product-db
+      - DB_USER=${PRODUCT_DB_USER}
+      - DB_PASS=${PRODUCT_DB_PASSWORD}
+      - DB_NAME=${PRODUCT_DB_NAME}
     ports:
       - "${PRODUCT_SERVICE_PORT}:3000"
+    networks:
+      - ecommerce-network
     depends_on:
       product-db:
         condition: service_healthy
 
-  # =======================
-  # CART SERVICE
-  # =======================
-  cart-service:
-    build: ./cart-services
-    container_name: cart-service
-    restart: always
-    ports:
-      - "8001:8000"
-
-  # =======================
-  # REVIEW SERVICE
-  # =======================
+  # =========================================
+  # 6. APP: REVIEW SERVICE (Python)
+  # =========================================
   review-service:
     build: ./review-services
     container_name: review-service
     restart: always
+    env_file:
+      - .env
+    environment:
+      - MONGO_URI=mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@review-db:27017/${MONGO_DB_NAME}?authSource=admin
     ports:
-      - "5002:5002"
+      - "5002:5000"
+    networks:
+      - ecommerce-network
+    depends_on:
+      - review-db
+
+  # =========================================
+  # 7. APP: CART SERVICE (PHP)
+  # =========================================
+  cart-service:
+    build: ./cart-services
+    container_name: cart-service
+    restart: always
+    volumes:
+      - ./cart-services:/var/www/html
+    ports:
+      - "8001:8000"
+    networks:
+      - ecommerce-network
+    depends_on:
+      product-db:
+        condition: service_healthy
+
+  # =========================================
+  # 8. APP: USER SERVICE (Node.js)
+  # =========================================
+  user-service:
+    build: ./user-services
+    container_name: user-service
+    restart: always
+    ports:
+      - "3001:3000"
+    networks:
+      - ecommerce-network
+
+# =========================================
+# NETWORK & VOLUMES
+# =========================================
+networks:
+  ecommerce-network:
+    driver: bridge
 
 volumes:
   product-db-data:
+  review-db-data:
