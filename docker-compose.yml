@@ -40,7 +40,7 @@ services:
       PMA_PORT: 3306
       PMA_ARBITRARY: 1
     ports:
-      - "8082:80" # Port 8082 (Beda dengan Mongo Express)
+      - "8082:80"
     networks:
       - ecommerce-network
     depends_on:
@@ -79,11 +79,11 @@ services:
     container_name: mongo-express
     restart: always
     ports:
-      - "${MONGO_EXPRESS_PORT}:8081" # Port 8081 sesuai .env
+      - "${MONGO_EXPRESS_PORT}:8081"
     environment:
       ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
-      ME_CONFIG_MONGODB_SERVER: review-db # Mengarah ke container review-db
+      ME_CONFIG_MONGODB_SERVER: review-db
       ME_CONFIG_MONGODB_PORT: 27017
       ME_CONFIG_MONGODB_AUTH_DATABASE: admin
     networks:
@@ -149,7 +149,25 @@ services:
         condition: service_healthy
 
   # =========================================
-  # 8. APP: USER SERVICE (Node.js)
+  # 8. DATABASE: POSTGRESQL (BARU - Untuk User Service)
+  # =========================================
+  user-db:
+    image: postgres:15-alpine
+    container_name: user-db
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: userdb
+    volumes:
+      - user-db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # Optional: agar bisa dicek via PgAdmin/DBeaver dari laptop
+    networks:
+      - ecommerce-network
+
+  # =========================================
+  # 9. APP: USER SERVICE (Node.js) - DIUPDATE
   # =========================================
   user-service:
     build: ./user-services
@@ -157,8 +175,16 @@ services:
     restart: always
     ports:
       - "3001:3000"
+    environment:
+      - DB_HOST=user-db    # Nama service database di atas
+      - DB_USER=user
+      - DB_PASSWORD=pass
+      - DB_NAME=userdb
+      - PORT=3000
     networks:
       - ecommerce-network
+    depends_on:
+      - user-db
 
 # =========================================
 # NETWORK & VOLUMES
@@ -170,3 +196,4 @@ networks:
 volumes:
   product-db-data:
   review-db-data:
+  user-db-data:    # <--- Volume baru untuk PostgreSQL

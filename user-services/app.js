@@ -1,58 +1,82 @@
 const express = require('express');
+const { DataTypes } = require('sequelize');
+const sequelize = require('./database');
+
 const app = express();
+app.use(express.json());
 
-app.use(express.json()); // agar bisa parse JSON POST
-
-// Dummy data user
-let users = [
-    { id: 1, name: 'Andi', email: 'andi@example.com', role: 'customer' },
-    { id: 2, name: 'Budi', email: 'budi@example.com', role: 'seller' },
-    { id: 3, name: 'Cici', email: 'cici@example.com', role: 'admin' },
-];
-
-// ===========================
-// GET semua user
-// ===========================
-app.get('/users', (req, res) => {
-    res.json(users);
+// 1. Definisikan Model User
+const User = sequelize.define('User', {
+    name: {
+        type: DataTypes.STRING,
+        allowNull: false
+    },
+    email: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true
+    },
+    role: {
+        type: DataTypes.STRING,
+        defaultValue: 'customer' // customer, seller, admin
+    }
+}, {
+    // --- PERBAIKAN PENTING DI SINI ---
+    tableName: 'users', // Memaksa nama tabel menjadi huruf kecil 'users'
+    timestamps: false   // Menghilangkan kolom createdAt & updatedAt (opsional, biar simpel)
 });
 
-// ===========================
-// GET detail user berdasarkan ID
-// ===========================
-app.get('/users/:id', (req, res) => {
-    const userId = parseInt(req.params.id);
-    const user = users.find(u => u.id === userId);
-    if (user) {
-        res.json(user);
-    } else {
-        res.status(404).json({ message: 'User tidak ditemukan' });
+// 2. Sinkronisasi Database
+const initDb = async () => {
+    try {
+        await sequelize.authenticate();
+        console.log('✅ Connected to PostgreSQL');
+        
+        // 'alter: true' akan menyesuaikan tabel jika ada perubahan struktur
+        await sequelize.sync({ alter: true }); 
+        console.log('✅ User Table Synced (Table name: users)');
+    } catch (error) {
+        console.error('❌ Unable to connect to PostgreSQL:', error);
+    }
+};
+
+initDb();
+
+// --- ROUTES ---
+
+// GET ALL USERS
+app.get('/users', async (req, res) => {
+    try {
+        const users = await User.findAll();
+        res.json(users);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
-// ===========================
-// POST tambah user
-// ===========================
-app.post('/users', (req, res) => {
-    const { name, email, role } = req.body;
-
-    if (!name || !email || !role) {
-        return res.status(400).json({ message: 'name, email, dan role wajib diisi' });
+// GET USER BY ID
+app.get('/users/:id', async (req, res) => {
+    try {
+        const user = await User.findByPk(req.params.id);
+        if (user) res.json(user);
+        else res.status(404).json({ message: 'User not found' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-
-    const newUser = {
-        id: users.length + 1,
-        name,
-        email,
-        role,
-    };
-
-    users.push(newUser);
-    res.status(201).json(newUser);
 });
 
-// Jalankan server di port 4000
-const PORT = process.env.PORT || 4000;
+// POST CREATE USER
+app.post('/users', async (req, res) => {
+    try {
+        const { name, email, role } = req.body;
+        const newUser = await User.create({ name, email, role });
+        res.status(201).json(newUser);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`User Service berjalan di http://0.0.0.0:${PORT}`);
+    console.log(`🚀 User Service running on port ${PORT}`);
 });

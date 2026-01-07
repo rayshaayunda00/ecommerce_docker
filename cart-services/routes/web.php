@@ -2,57 +2,71 @@
 
 /** @var \Laravel\Lumen\Routing\Router $router */
 
-use Illuminate\Http\Request; // 👈 PENTING: Tambahkan ini untuk membaca request
+use Illuminate\Http\Request;
 
-// Fungsi helper untuk menghitung ulang total
-// Kita pakai 'use (&$carts)' agar dia bisa memodifikasi array $carts
-$recalculateTotal = function () use (&$carts) {
-    $total = 0;
-    foreach ($carts['items'] as $item) {
-        $total += $item['price'] * $item['quantity'];
+/*
+|--------------------------------------------------------------------------
+| HELPER: SISTEM PENYIMPANAN FILE (JSON)
+|--------------------------------------------------------------------------
+*/
+
+// Lokasi file penyimpanan
+define('CART_FILE', storage_path('cart_data.json'));
+
+// Fungsi 1: Ambil data dari file
+function getCartData() {
+    // Jika file tidak ada, buat baru dengan isi KOSONG
+    if (!file_exists(CART_FILE)) {
+        $initialData = [
+            'items' => [], // <-- PENTING: Array kosong (bukan dummy data)
+            'total' => 0
+        ];
+        saveCartData($initialData);
+        return $initialData;
     }
-    $carts['total'] = $total;
-};
+    
+    // Baca file yang ada
+    $jsonContent = file_get_contents(CART_FILE);
+    $data = json_decode($jsonContent, true);
+    
+    // Validasi jika file rusak/kosong, kembalikan array kosong
+    return $data ?? ['items' => [], 'total' => 0];
+}
 
+// Fungsi 2: Simpan data ke file
+function saveCartData($data) {
+    // Hitung ulang total secara otomatis
+    $total = 0;
+    if (isset($data['items']) && is_array($data['items'])) {
+        foreach ($data['items'] as $item) {
+            $total += $item['price'] * $item['quantity'];
+        }
+    }
+    $data['total'] = $total;
 
-$router->get('/cart', function () use ($router) {
-    return 'Cart Service is running';
+    // Tulis ke file JSON
+    file_put_contents(CART_FILE, json_encode($data, JSON_PRETTY_PRINT));
+}
+
+/*
+|--------------------------------------------------------------------------
+| ROUTES API
+|--------------------------------------------------------------------------
+*/
+
+$router->get('/', function () {
+    return 'Cart Service (Persistent File) is Running!';
 });
 
-## Dummy cart data
-$carts = [
-    'items' => [
-        [
-            'id' => 1,
-            'name' => 'Product A',
-            'quantity' => 2,
-            'price' => 50.00
-        ],
-        [
-            'id' => 2,
-            'name' => 'Product B',
-            'quantity' => 1,
-            'price' => 30.00
-        ],
-        [
-            'id' => 3,
-            'name' => 'Product C',
-            'quantity' => 1,
-            'price' => 50.00
-        ]
-    ],
-    'total' => 180.00 // 👈 PERBAIKAN: Total yang benar (2*50 + 1*30 + 1*50)
-];
-
-// get all charts
-$router->get('/carts', function () use ($carts) {
-    // Selalu pastikan totalnya konsisten sebelum dikirim
-    return response()->json($carts);
+// 1. GET ALL CART
+$router->get('/carts', function () {
+    return response()->json(getCartData());
 });
 
-// get cart by id
-$router->get('/carts/{id}', function ($id) use ($carts) {
-    foreach ($carts['items'] as $item) {
+// 2. GET CART BY ID
+$router->get('/carts/{id}', function ($id) {
+    $cart = getCartData();
+    foreach ($cart['items'] as $item) {
         if ($item['id'] == $id) {
             return response()->json($item);
         }
@@ -60,83 +74,77 @@ $router->get('/carts/{id}', function ($id) use ($carts) {
     return response()->json(['message' => 'Item not found'], 404);
 });
 
+// 3. ADD ITEM (POST)
+$router->post('/carts', function (Request $request) {
+    $cart = getCartData();
 
-// 🚀 FUNGSI BARU: Menambahkan item ke keranjang (atau update quantity)
-$router->post('/carts', function (Request $request) use (&$carts, $recalculateTotal) {
-    
-    // Ambil data dari body request
-    $productId = $request->input('id');
-    $quantity = (int)$request->input('quantity');
-    $name = $request->input('name');
+    $id    = $request->input('id');
+    $name  = $request->input('name');
     $price = (float)$request->input('price');
+    $qty   = (int)$request->input('quantity');
 
-    // Validasi sederhana
-    if (!$productId || !$quantity || !$name || $price === null) {
-        return response()->json(['message' => 'Missing required fields: id, quantity, name, price'], 400);
+    if (!$id || !$name || $price === null || !$qty) {
+        return response()->json(['message' => 'Data tidak lengkap'], 400);
     }
 
+    // Cek duplikat
     $foundIndex = -1;
-    // Cek apakah item sudah ada di keranjang
-    foreach ($carts['items'] as $key => $item) {
-        if ($item['id'] == $productId) {
-            $foundIndex = $key;
+    foreach ($cart['items'] as $index => $item) {
+        if ($item['id'] == $id) {
+            $foundIndex = $index;
             break;
         }
     }
 
     $updatedItem = null;
-
     if ($foundIndex !== -1) {
-        // --- Item sudah ada ---
-        // Tambahkan kuantitasnya
-        $carts['items'][$foundIndex]['quantity'] += $quantity;
-        $updatedItem = $carts['items'][$foundIndex];
+        // Update jumlah
+        $cart['items'][$foundIndex]['quantity'] += $qty;
+        $updatedItem = $cart['items'][$foundIndex];
     } else {
-        // --- Item baru ---
-        // Buat item baru
+        // Buat baru
         $newItem = [
-            'id' => (int)$productId,
+            'id' => (int)$id,
             'name' => $name,
-            'quantity' => $quantity,
-            'price' => $price
+            'price' => $price,
+            'quantity' => $qty
         ];
-        // Masukkan ke array items
-        $carts['items'][] = $newItem;
+        $cart['items'][] = $newItem;
         $updatedItem = $newItem;
     }
 
-    // Panggil helper untuk hitung ulang total
-    $recalculateTotal();
-
-    // Kembalikan item yang baru/diupdate dengan status 201 (Created)
+    saveCartData($cart);
     return response()->json($updatedItem, 201);
 });
 
-
-// 🚀 PERBAIKAN: delete item from cart
-$router->delete('/carts/{id}', function ($id) use (&$carts, $recalculateTotal) {
-
-    $itemId = (int) $id;
+// 4. DELETE ITEM
+$router->delete('/carts/{id}', function ($id) {
+    $cart = getCartData();
+    $itemId = (int)$id;
     $foundIndex = -1;
 
-    // 🛑 PERBAIKAN: Logika pencarian harus di $carts['items']
-    foreach ($carts['items'] as $key => $item) {
+    foreach ($cart['items'] as $index => $item) {
         if ($item['id'] === $itemId) {
-            $foundIndex = $key;
+            $foundIndex = $index;
             break;
         }
     }
 
-    // Jika tidak ditemukan
-    if ($foundIndex === -1) {
-        return response()->json(['message' => 'Item not found'], 404);
+    if ($foundIndex !== -1) {
+        array_splice($cart['items'], $foundIndex, 1);
+        saveCartData($cart);
+        return response()->json(['message' => 'Item deleted successfully']);
     }
 
-    // 🛑 PERBAIKAN: Simulasi penghapusan data dari array
-    array_splice($carts['items'], $foundIndex, 1);
+    return response()->json(['message' => 'Item not found'], 404);
+});
 
-    // Panggil helper untuk hitung ulang total
-    $recalculateTotal();
-
-    return response()->json(['message' => 'Item deleted successfully']);
+// 5. FITUR TAMBAHAN: RESET CART (Untuk membersihkan data error)
+$router->delete('/carts', function () {
+    $emptyData = [
+        'items' => [],
+        'total' => 0
+    ];
+    saveCartData($emptyData);
+    return response()->json(['message' => 'Keranjang berhasil dikosongkan']);
 });
