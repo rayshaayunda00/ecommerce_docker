@@ -1,8 +1,12 @@
 const express = require('express');
 const { DataTypes } = require('sequelize');
 const sequelize = require('./database');
+const cors = require('cors'); // Tambahan agar aman di Browser
 
 const app = express();
+
+// Middleware
+app.use(cors()); // Izinkan akses dari mana saja (PENTING untuk Flutter Web)
 app.use(express.json());
 
 // 1. Definisikan Model User
@@ -18,12 +22,11 @@ const User = sequelize.define('User', {
     },
     role: {
         type: DataTypes.STRING,
-        defaultValue: 'customer' // customer, seller, admin
+        defaultValue: 'customer'
     }
 }, {
-    // --- PERBAIKAN PENTING DI SINI ---
-    tableName: 'users', // Memaksa nama tabel menjadi huruf kecil 'users'
-    timestamps: false   // Menghilangkan kolom createdAt & updatedAt (opsional, biar simpel)
+    tableName: 'users',
+    timestamps: false
 });
 
 // 2. Sinkronisasi Database
@@ -31,10 +34,8 @@ const initDb = async () => {
     try {
         await sequelize.authenticate();
         console.log('✅ Connected to PostgreSQL');
-        
-        // 'alter: true' akan menyesuaikan tabel jika ada perubahan struktur
-        await sequelize.sync({ alter: true }); 
-        console.log('✅ User Table Synced (Table name: users)');
+        await sequelize.sync({ alter: true });
+        console.log('✅ User Table Synced');
     } catch (error) {
         console.error('❌ Unable to connect to PostgreSQL:', error);
     }
@@ -47,7 +48,9 @@ initDb();
 // GET ALL USERS
 app.get('/users', async (req, res) => {
     try {
-        const users = await User.findAll();
+        const users = await User.findAll({ 
+            order: [['id', 'ASC']] // Biar urutannya rapi
+        });
         res.json(users);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -73,6 +76,28 @@ app.post('/users', async (req, res) => {
         res.status(201).json(newUser);
     } catch (err) {
         res.status(400).json({ error: err.message });
+    }
+});
+
+// --- PERBAIKAN: ROUTES DELETE (YANG HILANG TADI) ---
+app.delete('/users/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        
+        // Perintah Sequelize untuk menghapus berdasarkan ID
+        const deleted = await User.destroy({
+            where: { id: id }
+        });
+
+        if (deleted) {
+            // Jika berhasil (1 baris terhapus)
+            res.status(200).json({ message: 'User deleted successfully' });
+        } else {
+            // Jika ID tidak ditemukan (0 baris terhapus)
+            res.status(404).json({ message: 'User not found' });
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
